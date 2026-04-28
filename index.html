@@ -100,7 +100,8 @@
 
     /* API key row */
     .api-row {
-      display: flex; align-items: flex-end; gap: 10px;
+      display: none !important;
+      align-items: flex-end; gap: 10px;
       margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);
       flex-wrap: wrap;
     }
@@ -1359,15 +1360,13 @@
       updateThemeUI(true);
     }
 
-    const saved = LS.key();
-    if (saved) {
-      $key.value = saved;
-      localStorage.removeItem('tqqq_ath_v3');
-      localStorage.removeItem('tqqq_ath_v3_ts');
-      fetchTQQQ();
-    } else {
-      render();
-    }
+    // Set hardcoded API Key
+    const MY_KEY = 'd7kl0t9r01qiqbcuqjtgd7kl0t9r01qiqbcuqju0';
+    $key.value = MY_KEY;
+    LS.setKey(MY_KEY);
+
+    // Initial Fetch
+    fetchTQQQ();
   })();
 </script>
 </body>
