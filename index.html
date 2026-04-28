@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TQQQ 분할 매수 계획</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
       --bg: #0d1117;
@@ -1108,6 +1109,7 @@
           </div>
           <button class="btn btn-primary" onclick="saveAndFetch()">저장 &amp; 조회</button>
           <button class="btn btn-secondary" onclick="fetchTQQQ()">↺ 새로고침</button>
+          <button class="btn btn-secondary" style="border-color:var(--accent); color:var(--accent)" onclick="syncFromSupabase()">☁ 클라우드 동기화</button>
         </div>
 
         <div class="fetch-status">
@@ -1313,6 +1315,52 @@
       return 40;
     }
 
+    // ── Supabase ──────────────────────────────────────
+    const SUPABASE_URL = 'https://lfgawsvkohxvjtqqepsd.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxmZ2F3c3Zrb2h4dmp0cXFlcHNkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNzg2NTMsImV4cCI6MjA5Mjk1NDY1M30.6gnjZtjj41w2jgBxuM460UCVs1J8wn1R1NfN-OYieOw';
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    async function syncFromSupabase() {
+      setStatus('loading', 'Supabase와 데이터 동기화 중...');
+      try {
+        // 1. Fetch Buys
+        const { data: bData, error: bErr } = await sb.from('tqqq_buys').select('*').order('id', { ascending: true });
+        if (bErr) throw new Error('매수 데이터 조회 실패: ' + bErr.message);
+
+        // 2. Fetch Sells
+        const { data: sData, error: sErr } = await sb.from('tqqq_sells').select('*').order('id', { ascending: true });
+        if (sErr) throw new Error('매도 데이터 조회 실패: ' + sErr.message);
+
+        let migrationCount = 0;
+
+        // Migration logic: If Supabase is empty but localStorage has data, upload local data
+        if ((!bData || bData.length === 0) && buys.length > 0) {
+          const { error: insErr } = await sb.from('tqqq_buys').insert(buys);
+          if (insErr) throw new Error('매수 데이터 초기 업로드 실패: ' + insErr.message);
+          migrationCount += buys.length;
+        } else if (bData && bData.length > 0) {
+          buys = bData;
+          localStorage.setItem('tqqq_buys', JSON.stringify(buys));
+        }
+
+        if ((!sData || sData.length === 0) && sells.length > 0) {
+          const { error: insErr } = await sb.from('tqqq_sells').insert(sells);
+          if (insErr) throw new Error('매도 데이터 초기 업로드 실패: ' + insErr.message);
+          migrationCount += sells.length;
+        } else if (sData && sData.length > 0) {
+          sells = sData;
+          localStorage.setItem('tqqq_sells', JSON.stringify(sells));
+        }
+
+        const msg = migrationCount > 0 ? `동기화 완료 (${migrationCount}건 업로드)` : '클라우드 동기화 완료';
+        setStatus('ok', msg);
+        render();
+      } catch (e) {
+        console.error('Supabase sync error:', e);
+        setStatus('error', e.message);
+      }
+    }
+
     // Returns last triggered round index (cur ≤ target), -1 if none triggered
     function getActiveRound(ath, cur) {
       if (cur === null) return -1;
@@ -1441,11 +1489,10 @@
       const t = new Date().toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
       const txt = document.getElementById('fText');
       if (txt) {
-        txt.innerHTML =
-          state === 'loading' ? msg :
-            state === 'ok' ? `갱신 완료 · ${t} · ATH 기준: <b>${msg}</b> (Finnhub)` :
-              state === 'error' ? `⚠ ${msg}` :
-                msg;
+        if (state === 'loading') txt.innerHTML = msg;
+        else if (state === 'ok') txt.innerHTML = `${msg} · ${t}`;
+        else if (state === 'error') txt.innerHTML = `⚠ ${msg}`;
+        else txt.innerHTML = msg;
       }
     }
 
@@ -1647,6 +1694,16 @@
       localStorage.setItem('tqqq_buys', JSON.stringify(buys));
       document.getElementById(`buyForm-${i}`).style.display = 'none';
       render();
+
+      // Supabase Sync
+      sb.from('tqqq_buys').insert([buys[buys.length - 1]]).then(({ error }) => {
+        if (error) {
+          console.error('Supabase save error:', error);
+          setStatus('error', '매수 저장 실패: ' + error.message);
+        } else {
+          setStatus('ok', '매수 저장 완료 (Cloud)');
+        }
+      });
     }
 
     function deleteBuy(id) {
@@ -1654,6 +1711,11 @@
       buys = buys.filter(b => b.id !== id);
       localStorage.setItem('tqqq_buys', JSON.stringify(buys));
       render();
+
+      // Supabase Sync
+      sb.from('tqqq_buys').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error('Supabase delete error:', error);
+      });
     }
 
     // ── 매도 폼 ─────────────────────────────────────────
@@ -1743,6 +1805,16 @@
       localStorage.setItem('tqqq_sells', JSON.stringify(sells));
       document.getElementById(`sellForm-${id}`)?.style && (document.getElementById(`sellForm-${id}`).style.display = 'none');
       render();
+
+      // Supabase Sync
+      sb.from('tqqq_sells').insert([entry]).then(({ error }) => {
+        if (error) {
+          console.error('Supabase save error:', error);
+          setStatus('error', '매도 저장 실패: ' + error.message);
+        } else {
+          setStatus('ok', '매도 저장 완료 (Cloud)');
+        }
+      });
     }
 
     function deleteSell(id) {
@@ -1750,6 +1822,11 @@
       sells = sells.filter(s => s.id !== id);
       localStorage.setItem('tqqq_sells', JSON.stringify(sells));
       render();
+
+      // Supabase Sync
+      sb.from('tqqq_sells').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error('Supabase delete error:', error);
+      });
     }
 
     // ── 매수 이력 탭 렌더링 ─────────────────────────────────
@@ -2176,6 +2253,7 @@
 
       // Initial Fetch
       fetchTQQQ();
+      syncFromSupabase();
     })();
   </script>
 </body>
