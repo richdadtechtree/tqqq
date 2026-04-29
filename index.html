@@ -1357,8 +1357,8 @@
   </div>
 
   <script>
-    let sells = JSON.parse(localStorage.getItem('tqqq_sells') || '[]');
-    let buys = JSON.parse(localStorage.getItem('tqqq_buys') || '[]');
+    let sells = [];
+    let buys = [];
     let amounts = new Array(40).fill(null);
     let currentUser = null;
 
@@ -1413,8 +1413,6 @@
         currentUser = null;
         buys = [];
         sells = [];
-        localStorage.removeItem('tqqq_buys');
-        localStorage.removeItem('tqqq_sells');
         updateAuthUI();
         render();
       }
@@ -1459,25 +1457,30 @@
 
         let migrationCount = 0;
 
-        // Migration logic: If Supabase is empty but localStorage has data, upload local data
-        if ((!bData || bData.length === 0) && buys.length > 0) {
-          const buysWithUser = buys.map(b => ({ ...b, user_id: currentUser.id }));
+        // Migration logic: If Supabase is empty but localStorage has data (from previous versions), upload it
+        const localBuys = JSON.parse(localStorage.getItem('tqqq_buys') || '[]');
+        const localSells = JSON.parse(localStorage.getItem('tqqq_sells') || '[]');
+
+        if ((!bData || bData.length === 0) && localBuys.length > 0) {
+          const buysWithUser = localBuys.map(b => ({ ...b, user_id: currentUser.id }));
           const { error: insErr } = await sb.from('tqqq_buys').insert(buysWithUser);
           if (insErr) throw new Error('매수 데이터 초기 업로드 실패: ' + insErr.message);
-          migrationCount += buys.length;
+          migrationCount += localBuys.length;
+          buys = localBuys; // Use local data for now
+          localStorage.removeItem('tqqq_buys'); // Clear local storage after migration
         } else if (bData && bData.length > 0) {
           buys = bData;
-          localStorage.setItem('tqqq_buys', JSON.stringify(buys));
         }
 
-        if ((!sData || sData.length === 0) && sells.length > 0) {
-          const sellsWithUser = sells.map(s => ({ ...s, user_id: currentUser.id }));
+        if ((!sData || sData.length === 0) && localSells.length > 0) {
+          const sellsWithUser = localSells.map(s => ({ ...s, user_id: currentUser.id }));
           const { error: insErr } = await sb.from('tqqq_sells').insert(sellsWithUser);
           if (insErr) throw new Error('매도 데이터 초기 업로드 실패: ' + insErr.message);
-          migrationCount += sells.length;
+          migrationCount += localSells.length;
+          sells = localSells; // Use local data for now
+          localStorage.removeItem('tqqq_sells'); // Clear local storage after migration
         } else if (sData && sData.length > 0) {
           sells = sData;
-          localStorage.setItem('tqqq_sells', JSON.stringify(sells));
         }
 
         const msg = migrationCount > 0 ? `동기화 완료 (${migrationCount}건 업로드)` : '클라우드 동기화 완료';
@@ -1819,7 +1822,6 @@
         qty: qty,
         date: now.toISOString().split('T')[0],
       });
-      localStorage.setItem('tqqq_buys', JSON.stringify(buys));
       document.getElementById(`buyForm-${i}`).style.display = 'none';
       render();
 
@@ -1840,7 +1842,6 @@
     function deleteBuy(id) {
       if (!confirm('매수 기록을 삭제할까요?')) return;
       buys = buys.filter(b => b.id !== id);
-      localStorage.setItem('tqqq_buys', JSON.stringify(buys));
       render();
 
       // Supabase Sync
@@ -1933,7 +1934,6 @@
       };
 
       sells.push(entry);
-      localStorage.setItem('tqqq_sells', JSON.stringify(sells));
       document.getElementById(`sellForm-${id}`)?.style && (document.getElementById(`sellForm-${id}`).style.display = 'none');
       render();
 
@@ -1954,7 +1954,6 @@
     function deleteSell(id) {
       if (!confirm('매도 기록을 삭제할까요?')) return;
       sells = sells.filter(s => s.id !== id);
-      localStorage.setItem('tqqq_sells', JSON.stringify(sells));
       render();
 
       // Supabase Sync
